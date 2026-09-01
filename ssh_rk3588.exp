@@ -1,0 +1,18 @@
+#!/usr/bin/expect -f
+# Usage: ssh_rk3588.exp "<remote command>"
+set timeout 60
+set cmd [lindex $argv 0]
+spawn ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 firefly@192.168.10.72 $cmd
+expect {
+    "password:" {
+        send "firefly\r"
+        exp_continue
+    }
+    "yes/no" {
+        send "yes\r"
+        exp_continue
+    }
+    eof
+}
+catch wait result
+exit [lindex $result 3]

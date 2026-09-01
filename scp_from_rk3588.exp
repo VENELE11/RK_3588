@@ -1,0 +1,14 @@
+#!/usr/bin/expect -f
+# Usage: scp_from_rk3588.exp <remote_path> <local_path>
+set timeout 600
+set src [lindex $argv 0]
+set dst [lindex $argv 1]
+spawn scp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 firefly@192.168.10.72:$src $dst
+expect {
+    "password:" { send "firefly\r"; exp_continue }
+    "yes/no" { send "yes\r"; exp_continue }
+    timeout { puts "TIMEOUT"; exit 1 }
+    eof
+}
+catch wait result
+exit [lindex $result 3]

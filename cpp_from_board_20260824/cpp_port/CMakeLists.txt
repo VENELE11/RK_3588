@@ -1,0 +1,35 @@
+cmake_minimum_required(VERSION 3.10)
+project(yolov5_rknn_cpp LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_BUILD_TYPE Release)
+
+find_package(OpenCV REQUIRED)
+
+set(RKNN_ROOT "" CACHE PATH "Directory containing rknn_api.h and librknnrt.so")
+if(NOT RKNN_ROOT)
+    message(FATAL_ERROR "Pass -DRKNN_ROOT=/path/to/rknn/include")
+endif()
+set(RGA_ROOT "${RKNN_ROOT}/3rdparty/rga/RK3588" CACHE PATH "Rockchip RGA root")
+
+add_executable(yolov5_rknn src/main.cpp)
+target_include_directories(yolov5_rknn PRIVATE ${RKNN_ROOT} ${RGA_ROOT}/include ${OpenCV_INCLUDE_DIRS})
+target_link_directories(yolov5_rknn PRIVATE ${RKNN_ROOT} ${RGA_ROOT}/lib/Linux/aarch64)
+target_link_libraries(yolov5_rknn PRIVATE ${OpenCV_LIBS} rknnrt rga)
+target_compile_options(yolov5_rknn PRIVATE -O2 -Wall -Wextra)
+set_target_properties(yolov5_rknn PROPERTIES BUILD_RPATH "${RKNN_ROOT}")
+
+add_executable(yolov5_rknn_multi src/multi_main.cpp)
+target_include_directories(yolov5_rknn_multi PRIVATE ${RKNN_ROOT} ${RGA_ROOT}/include ${OpenCV_INCLUDE_DIRS})
+target_link_directories(yolov5_rknn_multi PRIVATE ${RKNN_ROOT} ${RGA_ROOT}/lib/Linux/aarch64)
+target_link_libraries(yolov5_rknn_multi PRIVATE ${OpenCV_LIBS} rknnrt rga pthread)
+target_compile_options(yolov5_rknn_multi PRIVATE -O2 -Wall -Wextra -pthread)
+set_target_properties(yolov5_rknn_multi PROPERTIES BUILD_RPATH "${RKNN_ROOT};${RGA_ROOT}/lib/Linux/aarch64")
+
+add_executable(yolo_modern src/modern_main.cpp)
+target_include_directories(yolo_modern PRIVATE ${RKNN_ROOT} ${RGA_ROOT}/include ${OpenCV_INCLUDE_DIRS})
+target_link_directories(yolo_modern PRIVATE ${RKNN_ROOT} ${RGA_ROOT}/lib/Linux/aarch64)
+target_link_libraries(yolo_modern PRIVATE ${OpenCV_LIBS} rknnrt rga)
+target_compile_options(yolo_modern PRIVATE -O2 -Wall -Wextra)
+set_target_properties(yolo_modern PROPERTIES BUILD_RPATH "${RKNN_ROOT};${RGA_ROOT}/lib/Linux/aarch64")
