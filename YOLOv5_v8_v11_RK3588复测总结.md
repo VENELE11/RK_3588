@@ -1,46 +1,62 @@
-# YOLOv5s / YOLOv8s / YOLO11s RK3588 复测总结
+# YOLO11s RK3588 修改与验证总结
 
-## 结论
+## 1. 修改目标
 
-在同一块 RK3588、同一套 500 张 COCO val2017 子集、同一预处理和官方 `pycocotools.COCOeval` 下，三种模型均使用当前可用的 RKNN INT8 产物进行复测。精度排序为 YOLO11s > YOLOv8s > YOLOv5s；纯 NPU 推理吞吐为 YOLOv8s > YOLO11s > YOLOv5s。
+原 YOLO11s 融合检测头模型在 RKNN INT8 下 AP 仅约 15.6%～16.3%，而 ONNX FP32 和 RKNN FP16 约 48%。主要修复方向是停止继续扩大末端检测头 FP16 范围，改正模型输出结构、输入类型和量化校准方式。
 
-## 统一测试条件
+## 2. YOLO11 模型结构修改
 
-- 输入：640×640，letterbox，114 灰边，RGB，uint8，NHWC。
-- 评测集：500 张 COCO val2017 子集，标注 `coco_val_subset_500.json`。
-- 后处理：conf=0.01，NMS=0.45，COCO category id 映射，最多 100 个检测参与 COCOeval。
-- 指标：bbox AP@[0.50:0.95]、AP50、AP75。
-- FPS：RK3588 板端 Python RKNN 纯推理，100 次、5 次 warmup，不含图像预处理和后处理。
+采用 RKNN Model Zoo 的 YOLO11s 原始解耦检测头 ONNX，输出三个尺度的 9 个张量：
 
-## 复测结果与官方数据
+- 回归分支：`[1,64,80,80]`、`[1,64,40,40]`、`[1,64,20,20]`
+- 分类分支：`[1,80,80,80]`、`[1,80,40,40]`、`[1,80,20,20]`
+- score 分支：`[1,1,80,80]`、`[1,1,40,40]`、`[1,1,20,20]`
 
-| 模型 | 板端模型 | 官方 AP@[.50:.95] | 板端 AP@[.50:.95] | 板端 AP50 | 板端 AP75 | 板端 FPS |
-|---|---|---:|---:|---:|---:|---:|
-| YOLOv5s | `yolov5s.rknn` | 37.4% | 41.28% | 59.91% | 45.01% | 5.81 |
-| YOLOv8s | `yolov8s.rknn` | 44.9% | 45.35% | 61.57% | 48.80% | 16.90 |
-| YOLO11s | `yolov11s_zoo_int8_letterbox500.rknn` | 47.0% | 48.03% | 65.31% | 52.18% | 15.91 |
+不再把 DFL、sigmoid、坐标解码和最终拼接放进 ONNX/RKNN 图中，相关逻辑迁移到浮点后处理。这样避免了 box 大数值和分类概率共用输出量化 scale，也避免融合输出在 INT8 下破坏检测头数值分布。
 
-官方值为 Ultralytics 640px、完整 COCO val2017、单模型单尺度结果：
+## 3. 输入与量化修改
 
-- YOLOv5/v8：<https://docs.ultralytics.com/compare/yolov5-vs-yolov8>
-- YOLO11/v8：<https://docs.ultralytics.com/compare/yolo11-vs-yolov8>
+- 固定部署输入为 640×640、114 灰边 letterbox、RGB、uint8、NHWC。
+- INT8 使用与部署预处理一致的 500 张图片生成校准集：`calibration_letterbox_500.txt`。
+- 验证发现 INT8 RKNN 输入必须是 8-bit；float32 直传会触发输入尺寸不匹配。
+- 增加输入探针脚本，后续可根据 `RKNN_QUERY_INPUT_ATTR` 的 `type/scale/zp` 分别验证 UINT8、INT8 手动量化和 pass-through。
+- 当前首轮采用 Toolkit2 2.3.2 默认 asymmetric INT8；MMSE、per-channel 和 hybrid quant 作为后续消融方向。
 
-由于板端使用 500 张子集，官方值使用完整 val2017，二者用于趋势对比，不应视为同数据集的严格复现。官方速度测试平台为 CPU ONNX、A100/TensorRT 等，与 RK3588 NPU FPS 不直接横向换算。
+## 4. C++ 与评测工具修改
 
-## YOLO11 INT8 修复结果
+- 新增 `cpp_port/src/raw_main.cpp`，提供 raw-head 推理和浮点 DFL/解码入口。
+- 新增 `cpp_port/CMakeLists_raw.txt`。
+- 修正 RKNN FLOAT16 输出读取，统一转换为 float 后再进行后处理。
+- 新增 `export_yolo11_raw.py`、`probe_rknn_input.py`、`probe_rknn_input_v2.py`。
+- 评测统一使用 500 张 COCO val2017 子集、114 灰边、conf=0.01、NMS=0.45 和官方 `pycocotools.COCOeval`。
 
-此前融合检测头 YOLO11 INT8 只有约 15.6%～16.3% AP。改用官方 RKNN Model Zoo 的原始解耦检测头输出，将 DFL、sigmoid、坐标解码和 NMS 放在 Python/C++ 后处理中，并使用与部署一致的 500 张 letterbox 校准集后：
+## 5. YOLO11 500 张复测结果
 
-- ONNX FP32：48.74% AP。
-- RKNN FP16：48.61% AP，5.91 FPS。
-- RKNN INT8：48.03% AP，15.65 FPS。
-- INT8 相比 FP16 下降 0.59 个百分点，达到 AP≥45%、差距≤3个百分点的第一阶段目标。
+| 模型 | AP@[0.50:0.95] | AP50 | AP75 | 纯 NPU FPS |
+|---|---:|---:|---:|---:|
+| 原始解耦头 ONNX FP32 | 48.74% | 65.67% | 53.01% | — |
+| 原始解耦头 RKNN FP16 | 48.61% | 65.67% | 52.98% | 5.91 |
+| 原始解耦头 RKNN INT8 | 48.03% | 65.31% | 52.18% | 15.65 |
 
-输入验证显示 INT8 RKNN 模型要求 8-bit 输入；float32 直传会因输入尺寸不匹配而失败，后续 C++ 必须依据模型输入 `type/scale/zp` 正确处理 UINT8、INT8 和 pass-through。
+INT8 相比 FP16 仅下降 0.59 个百分点，达到第一阶段目标：AP≥45%，且与 FP16 差距不超过 3 个百分点。
 
-## 本次同步内容
+## 6. 与 YOLOv5/v8 的背景对照
 
-- 新增原始检测头导出、输入探针和评测辅助脚本。
-- 新增 raw-head C++ 后处理入口及构建配置。
-- 新增 YOLO11 FP16/INT8 模型产物。
-- 更新测试方法、性能数据、模型对比、优化报告和任务总结文档。
+相同 500 张子集和 COCOeval 条件下，当前板端 INT8 结果为：YOLOv5s 41.28%、YOLOv8s 45.35%、YOLO11s 48.03%。这部分仅用于模型横向背景，不改变本次工作的主体——YOLO11 结构和量化修复。
+
+Ultralytics 官方完整 COCO val2017 参考 AP@[.50:.95]：YOLOv5s 37.4%、YOLOv8s 44.9%、YOLO11s 47.0%。由于官方使用完整验证集、板端使用 500 张子集，结果仅作趋势对比。
+
+## 7. 文件与模型产物
+
+- `model_outputs/yolov11s_zoo_fp16.rknn`
+- `model_outputs/yolov11s_zoo_int8_letterbox500.rknn`
+- `export_yolo11_raw.py`
+- `probe_rknn_input.py`
+- `probe_rknn_input_v2.py`
+- `cpp_port/src/raw_main.cpp`
+- `cpp_port/CMakeLists_raw.txt`
+- `RAW_HEAD_NEXT_STEPS.md`
+
+## 8. 后续建议
+
+优先用 Toolkit2 `accuracy_analysis` 定位首层、P3/P4/P5、neck Concat 和 DFL 前输出的误差，再进行 MMSE、per-channel、检测头 hybrid quant。只有 raw-head INT8 AP 再次低于约 42% 时，才进入 QAT。
