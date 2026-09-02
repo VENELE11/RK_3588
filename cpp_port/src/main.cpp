@@ -209,7 +209,19 @@ float sigmoid(float x) {
     return 1.0f / (1.0f + std::exp(-x));
 }
 
+float fp16_to_float(uint16_t h) {
+    const uint32_t sign = (h & 0x8000u) << 16;
+    const uint32_t exp = (h >> 10) & 0x1Fu;
+    const uint32_t mant = h & 0x03FFu;
+    uint32_t bits;
+    if (exp == 0) { if (mant == 0) bits = sign; else { uint32_t m = mant; int e = -14; while ((m & 0x400u) == 0) { m <<= 1; --e; } m &= 0x3FFu; bits = sign | (static_cast<uint32_t>(e + 127) << 23) | (m << 13); } }
+    else if (exp == 31) bits = sign | 0x7F800000u | (mant << 13);
+    else bits = sign | ((exp + 112u) << 23) | (mant << 13);
+    float out; std::memcpy(&out, &bits, sizeof(out)); return out;
+}
 float tensor_value(const TensorView& t, size_t i) {
+    if (t.type == RKNN_TENSOR_FLOAT16)
+        return fp16_to_float(static_cast<const uint16_t*>(t.data)[i]);
     if (t.type == RKNN_TENSOR_INT8)
         return (static_cast<const int8_t*>(t.data)[i] - t.zp) * t.scale;
     if (t.type == RKNN_TENSOR_UINT8)

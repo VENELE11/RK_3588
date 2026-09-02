@@ -167,9 +167,9 @@ void collect_fused_float(const TensorView& tensor, bool channels_first, int n,
                                   : static_cast<size_t>(i) * 84 + 4 + c;
         };
         int cls = 0;
-        float best = data[index(0)];
+        float best = tensor_value(tensor, index(0));
         for (int c = 1; c < kClasses; ++c) {
-            const float value = data[index(c)];
+            const float value = tensor_value(tensor, index(c));
             if (value > best) { best = value; cls = c; }
         }
         const float score = apply_sigmoid ? sigmoid(best) : best;

@@ -1,0 +1,8 @@
+# Include this target in CMakeLists.txt after the existing RKNN variables are
+# defined, or configure a small build with this file copied as CMakeLists.txt.
+add_executable(yolo11_raw src/raw_main.cpp)
+target_include_directories(yolo11_raw PRIVATE ${RKNN_INCLUDE_DIR} ${RGA_ROOT}/include ${OpenCV_INCLUDE_DIRS})
+target_link_directories(yolo11_raw PRIVATE ${RKNN_LIBRARY_DIR} ${RGA_ROOT}/lib/Linux/aarch64)
+target_link_libraries(yolo11_raw PRIVATE ${OpenCV_LIBS} rknnrt rga)
+target_compile_options(yolo11_raw PRIVATE -O2 -Wall -Wextra)
+set_target_properties(yolo11_raw PROPERTIES BUILD_RPATH "${RKNN_LIBRARY_DIR};${RGA_ROOT}/lib/Linux/aarch64")
